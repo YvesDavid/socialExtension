@@ -1,0 +1,17 @@
+<li>
+    <div>
+        📁 <a href="{{ path('app_resources_index', { parent: folder.id }) }}">
+            {{ folder.title }}
+        </a>
+    </div>
+
+    {% if folder.children is not empty %}
+        <ul class="list-unstyled ms-3">
+            {% for child in folder.children %}
+                {% if child.resourceType == 'folder' %}
+                    {% include 'resource/_folder_tree_item.html.twig' with { folder: child } %}
+                {% endif %}
+            {% endfor %}
+        </ul>
+    {% endif %}
+</li>

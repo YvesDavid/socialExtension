@@ -1,0 +1,48 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Ressource #{{ resource.id }}{% endblock %}
+
+{% block body %}
+<div class="container mt-4">
+    <a href="{{ path('app_resources_index') }}" class="btn btn-link mb-3">&larr; Retour à la liste</a>
+
+    <h1>{{ resource.title }}</h1>
+
+    <p class="text-muted">
+        Type : <strong>{{ resource.resourceType }}</strong> |
+        Taille : <strong>{{ (resource.size / 1024)|number_format(1, ',', ' ') }} Ko</strong> |
+        Créée le : <strong>{{ resource.createdAt|date('d/m/Y H:i') }}</strong>
+    </p>
+
+    {% if resource.description %}
+        <p>{{ resource.description }}</p>
+    {% endif %}
+
+    <h3>Informations techniques</h3>
+    <ul>
+        <li>Path : <code>{{ resource.path }}</code></li>
+        <li>MIME type : <code>{{ resource.mimeType }}</code></li>
+        <li>Public : {{ resource.isPublic ? 'Oui' : 'Non' }}</li>
+    </ul>
+
+    {% if resource.metadata %}
+        <h3>Métadonnées</h3>
+        <pre>{{ resource.metadata|json_encode(constant('JSON_PRETTY_PRINT')) }}</pre>
+    {% endif %}
+
+    <h3>Téléchargement</h3>
+    <p>
+        <a href="/api/v1/resources/{{ resource.id }}/download" class="btn btn-success">
+            Télécharger le fichier
+        </a>
+    </p>
+
+    {% if resource.creator %}
+        <h3>Créateur</h3>
+        <p>
+            {{ resource.creator.firstname }} {{ resource.creator.lastname }}
+            (ID: {{ resource.creator.id }})
+        </p>
+    {% endif %}
+</div>
+{% endblock %}

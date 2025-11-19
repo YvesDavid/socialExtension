@@ -30,12 +30,12 @@ class SharedResourceController extends AbstractController
     #[Route('', name: 'api_resources_create', methods: ['POST'])]
     public function create(Request $request): JsonResponse
     {
-        // 🔹 Récupérer l'utilisateur connecté
+        //  Récupérer l'utilisateur connecté
         /** @var User|null $user */
        // $user = $this->getUser(); // temporaire pour eviter l'identification
         $user = $this->userRepository->findOneBy(['email' => 'john.doe@test.com']);
         if (!$user) {
-            // Pour l’instant, tu peux temporairement bypass ça en récupérant John Doe depuis le repo User
+            // récupére John Doe depuis le repo User pour eviter l'identification
             return $this->json(['error' => 'Authentication required'], 401);
         }
 
@@ -45,7 +45,6 @@ class SharedResourceController extends AbstractController
             return $this->json(['error' => 'Invalid JSON body'], 400);
         }
 
-        // ✅ Validation minimale
         $requiredFields = ['title', 'resource_type', 'path', 'mime_type', 'size', 'is_public'];
         foreach ($requiredFields as $field) {
             if (!\array_key_exists($field, $data)) {
@@ -70,14 +69,12 @@ class SharedResourceController extends AbstractController
             $resource->setMetadata($data['metadata']);
         }
 
-        // 🔹 Gestion du parent si fourni
         if (!empty($data['parent_id'])) {
             $parent = $this->sharedResourceRepository->find($data['parent_id']);
             if (!$parent) {
                 return $this->json(['error' => 'Parent resource not found'], 404);
             }
 
-            // TODO: check permission to create inside this parent
             $resource->setParent($parent);
         }
 
@@ -117,7 +114,6 @@ class SharedResourceController extends AbstractController
         $creator = $resource->getCreator();
         $parent = $resource->getParent();
 
-        // Exemple simple, inspiré de ton contrat JSON
         $response = [
             'id' => $resource->getId(),
             'title' => $resource->getTitle(),
@@ -138,7 +134,6 @@ class SharedResourceController extends AbstractController
             ] : null,
             'metadata' => $resource->getMetadata(),
             'access_rights' => [
-                // Pour l’instant en dur, on affinera avec un service de permissions
                 'can_edit' => $user && $creator && $creator->getId() === $user->getId(),
                 'can_delete' => $user && $creator && $creator->getId() === $user->getId(),
                 'can_share' => $user && $creator && $creator->getId() === $user->getId(),
@@ -160,16 +155,12 @@ class SharedResourceController extends AbstractController
         }
 
         // Pour plus tard : vérif que l'utilisateur a le droit de supprimer
-        // (créateur, admin, etc.)
 
         // Optionnel : lecture du body JSON
         $data = json_decode($request->getContent() ?: '{}', true);
         $force = $request->query->getBoolean('force', false);
         $deletionReason = $data['deletion_reason'] ?? null;
         $notifyUsers = $data['notify_users'] ?? false;
-
-        // Pour l’instant, on ignore deletionReason & notifyUsers
-        // mais tu peux les loguer si tu veux
 
         $this->em->remove($resource);
         $this->em->flush();
@@ -197,7 +188,7 @@ class SharedResourceController extends AbstractController
         // Pour l’instant on ne vérifie pas les permissions (is_public, etc.)
 
         // On reconstruit le chemin physique du fichier
-        $relativePath = $resource->getPath(); // ex: "/storage/documents/schedule.pdf"
+        $relativePath = $resource->getPath(); // ex: "/storage/documents/fichier.pdf"
         $projectDir = $this->getParameter('kernel.project_dir');
         $filePath = $projectDir . '/public' . $relativePath;
 
@@ -218,4 +209,50 @@ class SharedResourceController extends AbstractController
         return $response;
     }
 
+///////////////////////////lister les ressources par parent/////////////////////////////////////////
+
+
+        #[Route('', name: 'api_resources_list', methods: ['GET'])]
+    public function list(Request $request): JsonResponse
+    {
+        $parentId = $request->query->get('parent_id', $request->query->get('parent'));
+
+        if ($parentId !== null) {
+            $parent = $this->sharedResourceRepository->find($parentId);
+
+            if (!$parent) {
+                return $this->json(['error' => 'Parent resource not found'], Response::HTTP_NOT_FOUND);
+            }
+
+            $resources = $this->sharedResourceRepository->findBy(
+                ['parent' => $parent],
+                ['createdAt' => 'DESC']
+            );
+        } else {
+            // Racine : toutes les ressources sans parent
+            $resources = $this->sharedResourceRepository->findBy(
+                ['parent' => null],
+                ['createdAt' => 'DESC']
+            );
+        }
+
+        $data = array_map(function (SharedResource $resource) {
+            return [
+                'id' => $resource->getId(),
+                'title' => $resource->getTitle(),
+                'resource_type' => $resource->getResourceType(),
+                'is_public' => $resource->isPublic(),
+                'size' => $resource->getSize(),
+                'created_at' => $resource->getCreatedAt()->format(DATE_ATOM),
+                'is_folder' => $resource->getResourceType() === 'folder',
+                'parent_id' => $resource->getParent() ? $resource->getParent()->getId() : null,
+            ];
+        }, $resources);
+
+        return $this->json($data);
+    }
+
 }
+
+///////////////////////////lister les ressources par parent/////////////////////////////////////////
+

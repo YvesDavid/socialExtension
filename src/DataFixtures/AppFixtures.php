@@ -3,45 +3,49 @@
 namespace App\DataFixtures;
 
 use App\Entity\User;
-use App\Entity\SharedResource;
 use Doctrine\Bundle\FixturesBundle\Fixture;
 use Doctrine\Persistence\ObjectManager;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 class AppFixtures extends Fixture
 {
+    public function __construct(private UserPasswordHasherInterface $hasher) {}
+
     public function load(ObjectManager $manager): void
     {
+        $now = new \DateTimeImmutable();
+
+        // ADMIN
+        $admin = new User();
+        $admin->setFirstname('Admin');
+        $admin->setLastname('User');
+        $admin->setEmail('admin@test.com');
+        $admin->setPassword(
+        $this->hasher->hashPassword($admin, 'admin123')
+    );
+
+        $admin->setRoles(['ROLE_ADMIN']);
+        $admin->setBirthdate(new \DateTimeImmutable('1990-01-01'));
+        $admin->setCreatedAt($now);
+        $admin->setUpdatedAt($now);
+
+        $manager->persist($admin);
+
+        // USER
         $user = new User();
-        $user->setFirstname('John');
-        $user->setLastname('Doe');
-        $user->setEmail('john.doe@test.com');
-        $user->setPassword('test');
-        $user->setBirthdate(new \DateTime('1990-01-01'));
-        $user->setAvatar(null);
-        $user->setBio('Utilisateur de test');
-        $user->setCreatedAt(new \DateTimeImmutable());
-        $user->setUpdatedAt(new \DateTimeImmutable());
+        $user->setFirstname('Regular');
+        $user->setLastname('User');
+        $user->setEmail('user@test.com');
+        $user->setPassword(
+            $this->hasher->hashPassword($user, 'user123')
+        );
+        $user->setRoles(['ROLE_USER']);
+        $user->setBirthdate(new \DateTime('1995-01-01'));
+
+        $user->setCreatedAt($now);
+        $user->setUpdatedAt($now);
 
         $manager->persist($user);
-
-        $resource = new SharedResource();
-        $resource->setTitle('Doc de test');
-        $resource->setDescription('Première ressource de test');
-        $resource->setResourceType('document');
-        $resource->setPath('/fake/path/doc.pdf');
-        $resource->setMimeType('application/pdf');
-        $resource->setSize(123456);
-        $resource->setIsPublic(false);
-        $resource->setMetadata([
-            'version' => '1.0',
-            'tags' => ['test', 'demo'],
-        ]);
-        $resource->setCreator($user);
-        $resource->setCreatedAt(new \DateTimeImmutable());
-        $resource->setUpdatedAt(new \DateTimeImmutable());
-
-        $manager->persist($resource);
-
         $manager->flush();
     }
 }
