@@ -54,9 +54,28 @@
                 <div class="d-flex align-items-center gap-2">
                     <i class="bi bi-share-fill"></i>
                     <a href="{{ path('app_resources_index') }}" class="fw-semibold">
-                        Social Network Addons
+                        Gestion des ressources
                     </a>
-                </div>
+            <ul class="navbar-nav ms-auto">
+                {{ render(path('app_notifications_navbar')) }}
+            </ul>
+
+        </div>
+            <div class="d-flex align-items-center ms-auto">
+                {% if app.user %}
+                    <span class="text-light me-3">
+                        Connecté en tant que <strong>{{ app.user.email }}</strong>
+                    </span>
+                    <a href="{{ path('app_logout') }}" class="btn btn-outline-light btn-sm">
+                        Déconnexion
+                    </a>
+                {% else %}
+                    <a href="{{ path('app_login') }}" class="btn btn-outline-light btn-sm">
+                        Connexion
+                    </a>
+                {% endif %}
+            </div>
+
                 <div class="small text-muted">
                     Shared Resources
                 </div>

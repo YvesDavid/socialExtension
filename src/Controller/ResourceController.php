@@ -1,34 +1,40 @@
 <?php
 
-// src/Controller/ResourceController.php
 namespace App\Controller;
 
 use App\Entity\SharedResource;
+use App\Entity\User;
 use App\Repository\SharedResourceRepository;
 use App\Repository\UserRepository;
+use App\Service\NotificationManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Filesystem\Filesystem;
+use Symfony\Component\HttpFoundation\File\UploadedFile;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Annotation\Route;
-use Symfony\Component\HttpFoundation\File\UploadedFile;
-use Symfony\Component\Filesystem\Filesystem;
-
-
 
 class ResourceController extends AbstractController
 {
     public function __construct(
         private SharedResourceRepository $sharedResourceRepository,
         private EntityManagerInterface $em,
-        private UserRepository $userRepository, 
+        private UserRepository $userRepository,
+        private NotificationManager $notificationManager
     ) {}
 
     #[Route('/resources', name: 'app_resources_index')]
     public function index(Request $request): Response
     {
-        $parentId = $request->query->get('parent');
+        /** @var User|null $user */
+        $user = $this->getUser();
+        if (!$user) {
+            return $this->redirectToRoute('app_login');
+        }
 
+        $parentId = $request->query->get('parent');
         $parent = null;
         if ($parentId) {
             $parent = $this->sharedResourceRepository->find($parentId);
@@ -37,15 +43,49 @@ class ResourceController extends AbstractController
             }
         }
 
-        // Contenu du dossier courant
-        $criteria = ['parent' => $parent];
-        $resources = $this->sharedResourceRepository->findBy($criteria, ['createdAt' => 'DESC']);
+        $isAdmin = in_array('ROLE_ADMIN', $user->getRoles(), true);
+
+        if ($isAdmin) {
+            // admin : voit tout
+            $resources = $this->sharedResourceRepository->findBy(
+                ['parent' => $parent],
+                ['createdAt' => 'DESC']
+            );
+        } else {
+            // user simple : public + ses propres ressources
+            $qb = $this->sharedResourceRepository->createQueryBuilder('r');
+            
+            if ($parent) {
+                $qb->andWhere('r.parent = :parent')
+                ->setParameter('parent', $parent);
+            } else {
+                $qb->andWhere('r.parent IS NULL');
+            }
+
+            $qb->andWhere('(r.isPublic = true OR r.creator = :user)')
+            ->setParameter('user', $user)
+            ->orderBy('r.createdAt', 'DESC');
+
+            $resources = $qb->getQuery()->getResult();
+        }
 
         // Racine des dossiers pour l’arborescence (colonne de gauche)
-        $rootFolders = $this->sharedResourceRepository->findBy(
-            ['parent' => null, 'resourceType' => 'folder'],
-            ['title' => 'ASC']
-        );
+        if ($isAdmin) {
+            $rootFolders = $this->sharedResourceRepository->findBy(
+                ['parent' => null, 'resourceType' => 'folder'],
+                ['title' => 'ASC']
+            );
+        } else {
+            $qbRoot = $this->sharedResourceRepository->createQueryBuilder('r')
+                ->andWhere('r.parent IS NULL')
+                ->andWhere('r.resourceType = :folder')
+                ->setParameter('folder', 'folder')
+                ->andWhere('r.isPublic = true OR r.creator = :user')
+                ->setParameter('user', $user)
+                ->orderBy('r.title', 'ASC');
+
+            $rootFolders = $qbRoot->getQuery()->getResult();
+        }
 
         return $this->render('resource/index.html.twig', [
             'resources'    => $resources,
@@ -71,16 +111,19 @@ class ResourceController extends AbstractController
     #[Route('/resources/new', name: 'app_resources_new', methods: ['POST'])]
     public function new(Request $request): Response
     {
-        $user = $this->userRepository->findOneBy(['email' => 'admin@test.com']); // provisoire, on mettra getUser() après la partie login
+        /** @var User|null $user */
+        $user = $this->getUser();
+
         if (!$user) {
-            throw $this->createNotFoundException('User not found');
+            $this->addFlash('error', 'You must be logged in to create resources.');
+            return $this->redirectToRoute('app_login');
         }
 
-        $type = $request->request->get('resource_type'); // 'folder' ou 'file'
-        $name = $request->request->get('name');
-        $visibility = $request->request->get('visibility'); // 'public' ou 'private'
-        $parentId = $request->request->get('parent_id');
-        $fileKind = $request->request->get('file_kind'); // document|image|video|presentation
+        $type       = $request->request->get('resource_type'); // 'folder' ou 'file'
+        $name       = $request->request->get('name');
+        $visibility = $request->request->get('visibility');    // 'public' ou 'private'
+        $parentId   = $request->request->get('parent_id');
+        $fileKind   = $request->request->get('file_kind');     // document|image|video|presentation
 
         /** @var UploadedFile|null $uploadedFile */
         $uploadedFile = $request->files->get('uploaded_file');
@@ -146,7 +189,7 @@ class ResourceController extends AbstractController
 
             // Dossier de stockage
             $projectDir = $this->getParameter('kernel.project_dir');
-            $uploadDir = $projectDir . '/public/storage/uploads';
+            $uploadDir  = $projectDir . '/public/storage/uploads';
 
             $fs = new Filesystem();
             if (!$fs->exists($uploadDir)) {
@@ -154,11 +197,11 @@ class ResourceController extends AbstractController
             }
 
             // Nom de fichier unique
-            $safeName = bin2hex(random_bytes(8));
+            $safeName       = bin2hex(random_bytes(8));
             $targetFilename = $safeName . '.' . $extension;
 
             // On récupère les infos AVANT le move
-            $size = $uploadedFile->getSize() ?: 0;
+            $size     = $uploadedFile->getSize() ?: 0;
             $mimeType = $uploadedFile->getClientMimeType() ?: 'application/octet-stream';
 
             // On déplace le fichier vers le dossier final
@@ -176,10 +219,109 @@ class ResourceController extends AbstractController
         $this->em->persist($resource);
         $this->em->flush();
 
+        // 🔔 Notification admin : création
+        $admin = $this->getAdminUser();
+        if ($admin && $admin !== $user) {
+            $this->notificationManager->notify(
+                type: 'resource_created',
+                recipient: $admin,
+                sender: $user,
+                title: 'Nouvelle ressource créée',
+                content: sprintf(
+                    '%s %s a créé la ressource "%s" (%s) le %s.',
+                    $user->getFirstname(),
+                    $user->getLastname(),
+                    $resource->getTitle(),
+                    $resource->getResourceType(),
+                    (new \DateTimeImmutable())->format('d/m/Y H:i')
+                ),
+                priority: 'medium',
+                relationId: $resource->getId(),
+                actionUrl: $this->generateUrl('app_resources_show', ['id' => $resource->getId()]),
+                metadata: [
+                    'resource_id'   => $resource->getId(),
+                    'resource_type' => $resource->getResourceType(),
+                    'title'         => $resource->getTitle(),
+                ]
+            );
+        }
+
         $this->addFlash('success', 'Ressource créée avec succès.');
 
         return $this->redirectToRoute('app_resources_index', [
             'parent' => $parentId ?: null,
         ]);
+    }
+
+    #[Route('/resources/{id}/delete', name: 'app_resources_delete', methods: ['POST'])]
+    public function delete(int $id, Request $request): RedirectResponse
+    {
+        /** @var User|null $user */
+        $user = $this->getUser();
+        if (!$user) {
+            return $this->redirectToRoute('app_login');
+        }
+
+        $resource = $this->sharedResourceRepository->find($id);
+        if (!$resource) {
+            $this->addFlash('error', 'Ressource introuvable.');
+            return $this->redirectToRoute('app_resources_index');
+        }
+
+        // On garde des infos AVANT la suppression
+        $title     = $resource->getTitle();
+        $type      = $resource->getResourceType();
+        $deletedAt = new \DateTimeImmutable();
+        $parent    = $resource->getParent();
+
+        $this->em->remove($resource);
+        $this->em->flush();
+
+        // 🔔 Notification admin : suppression
+        $admin = $this->getAdminUser();
+        if ($admin && $admin !== $user) {
+            $this->notificationManager->notify(
+                type: 'resource_deleted',
+                recipient: $admin,
+                sender: $user,
+                title: 'Ressource supprimée',
+                content: sprintf(
+                    'La ressource "%s" (%s) a été supprimée par %s %s le %s.',
+                    $title,
+                    $type,
+                    $user->getFirstname(),
+                    $user->getLastname(),
+                    $deletedAt->format('d/m/Y H:i')
+                ),
+                priority: 'low',
+                relationId: null,
+                actionUrl: null,
+                metadata: [
+                    'title'         => $title,
+                    'resource_type' => $type,
+                    'deleted_at'    => $deletedAt->format(\DateTimeInterface::ATOM),
+                ]
+            );
+        }
+
+        $this->addFlash('success', 'Ressource supprimée avec succès.');
+
+        return $this->redirectToRoute('app_resources_index', [
+            'parent' => $parent?->getId(),
+        ]);
+    }
+
+    /**
+     * Retourne un admin (premier user qui possède ROLE_ADMIN)
+     */
+    private function getAdminUser(): ?User
+    {
+        // roles est stocké en JSON, on fait un LIKE simple : %\"ROLE_ADMIN\"%
+        return $this->userRepository->createQueryBuilder('u')
+            ->andWhere('u.roles LIKE :role')
+            ->setParameter('role', '%"ROLE_ADMIN"%')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
     }
 }

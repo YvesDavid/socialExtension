@@ -1,0 +1,44 @@
+<li class="nav-item dropdown">
+    <a class="nav-link position-relative"
+       href="{{ path('app_notifications_index') }}"
+       id="navbarDropdownNotif"
+       role="button"
+       data-bs-toggle="dropdown"
+       aria-expanded="false">
+
+        🔔
+
+        {% if unchecked_count > 0 %}
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                {{ unchecked_count }}
+            </span>
+        {% endif %}
+    </a>
+
+    <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarDropdownNotif" style="min-width: 320px;">
+        {% if notifications is empty %}
+            <li>
+                <span class="dropdown-item-text text-muted">Aucune notification</span>
+            </li>
+        {% else %}
+            {% for notif in notifications %}
+                <li>
+                    <a class="dropdown-item d-flex flex-column {% if not notif.checked %}fw-bold{% endif %}"
+                       href="{{ path('app_notifications_go', {id: notif.id}) }}">
+                        <span>{{ notif.title }}</span>
+                        <small class="text-muted">
+                            {{ notif.createdAt|date('d/m/Y H:i') }}
+                        </small>
+                    </a>
+                </li>
+            {% endfor %}
+
+            <li><hr class="dropdown-divider"></li>
+            <li>
+                <a class="dropdown-item text-center" href="{{ path('app_notifications_index') }}">
+                    Voir toutes les notifications
+                </a>
+            </li>
+        {% endif %}
+    </ul>
+</li>
